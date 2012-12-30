@@ -8,15 +8,24 @@
 package org.postgresql.jdbc4;
 
 
-import java.sql.*;
-import java.io.Reader;
+import org.postgresql.core.BaseStatement;
+import org.postgresql.core.Field;
+import org.postgresql.core.Query;
+import org.postgresql.core.ResultCursor;
+import org.postgresql.util.GT;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.PSQLState;
+
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
+import java.sql.*;
 import java.util.List;
-import org.postgresql.core.*;
 
 abstract class AbstractJdbc4ResultSet extends org.postgresql.jdbc3g.AbstractJdbc3gResultSet
 {
-    AbstractJdbc4ResultSet(Query originalQuery, BaseStatement statement, Field[] fields, List tuples, ResultCursor cursor,
+
+	AbstractJdbc4ResultSet(Query originalQuery, BaseStatement statement, Field[] fields, List tuples, ResultCursor cursor,
                     int maxRows, int maxFieldSize, int rsType, int rsConcurrency, int rsHoldability) throws SQLException
     {
         super(originalQuery, statement, fields, tuples, cursor, maxRows, maxFieldSize, rsType, rsConcurrency, rsHoldability);
@@ -238,7 +247,51 @@ abstract class AbstractJdbc4ResultSet extends org.postgresql.jdbc3g.AbstractJdbc
 
     public void updateBinaryStream(int columnIndex, InputStream inputStream, long length) throws SQLException
     {
-        throw org.postgresql.Driver.notImplemented(this.getClass(), "updateBinaryStream(int, InputStream, long)");
+	    if (length > Integer.MAX_VALUE && length > 0)
+	    {
+		    throw new PSQLException(GT.tr("Object is too large to send over the protocol."), PSQLState.NUMERIC_CONSTANT_OUT_OF_RANGE);
+	    }
+
+	    if (inputStream == null)
+	    {
+		    updateNull(columnIndex);
+		    return ;
+	    }
+
+	    byte data[] = new byte[(int)length];
+	    int numRead = 0;
+	    try
+	    {
+		    while (true)
+		    {
+			    int n = inputStream.read(data, numRead, (int)length - numRead);
+			    if (n == -1)
+				    break;
+
+			    numRead += n;
+
+			    if (numRead == length)
+				    break;
+		    }
+	    }
+	    catch (IOException ie)
+	    {
+		    throw new PSQLException(GT.tr("Provided InputStream failed."), null, ie);
+	    }
+
+	    if (numRead == length)
+	    {
+		    updateBytes(columnIndex, data);
+	    }
+	    else
+	    {
+		    // the stream contained less data than they said
+		    // perhaps this is an error?
+		    byte data2[] = new byte[numRead];
+		    System.arraycopy(data, 0, data2, 0, numRead);
+		    updateBytes(columnIndex, data2);
+	    }
+
     }
 
     public void updateBinaryStream(String columnName, InputStream inputStream, long length) throws SQLException
